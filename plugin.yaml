@@ -1,0 +1,5 @@
+name: wazoo
+version: 1.0.0
+description: "Wazoo world-model memory: typed memories in an RDF graph, hybrid search, SPARQL queries."
+config_keys:
+  - memory.wazoo  # data_url / world_id; tokens live in scoped secrets
