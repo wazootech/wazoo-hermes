@@ -433,3 +433,37 @@ class TestSelfHostedWithLocalKey(unittest.TestCase):
                 "wazoo_remember", {"kind": "decision", "statement": "local key works"}))
         self.assertNotIn("error", out)
         self.assertEqual(s.calls[0][3].get("Authorization"), "Bearer wzw_local_key")
+
+
+class TestIdempotentRemember(unittest.TestCase):
+    """worlds-api blank-node imports accumulate duplicates (#177); the provider
+    must use stable subject IRIs so retries and repeats upsert."""
+
+    def test_same_statement_produces_identical_triples(self):
+        t1 = wz._memory_turtle("decision", "ship on Tuesdays")
+        t2 = wz._memory_turtle("decision", "ship on Tuesdays")
+        self.assertEqual(t1, t2)
+        self.assertIn(f"<{wz.VOCAB}memory/decision-", t1)
+        self.assertNotIn("[] a wz:", t1)
+
+    def test_different_kind_same_statement_is_distinct(self):
+        t1 = wz._memory_turtle("decision", "x")
+        t2 = wz._memory_turtle("preference", "x")
+        self.assertNotEqual(t1, t2)
+
+    def test_repeated_remember_does_not_duplicate(self):
+        p = make_provider()
+        s = _Scripted([("/import", {"imported": {"quads": 3, "chunks": 0}}),
+                       ("/import", {"imported": {"quads": 3, "chunks": 0}}),
+                       ("/sparql", {"head": {"vars": ["n"]},
+                                    "results": {"bindings": [{"n": {"type": "literal", "value": "3"}}]}})])
+        with mock.patch.object(wz._urlrequest, "urlopen", s):
+            p.handle_tool_call("wazoo_remember", {"kind": "decision", "statement": "same fact"})
+            p.handle_tool_call("wazoo_remember", {"kind": "decision", "statement": "same fact"})
+            out = json.loads(p.handle_tool_call("wazoo_memories", {"kind": "decision", "limit": 10}))
+        body1 = json.loads(s.calls[0][2])
+        body2 = json.loads(s.calls[1][2])
+        # both imports sent the IDENTICAL document (same subject IRI)
+        self.assertEqual(body1["data"], body2["data"])
+        self.assertIn(f"<{wz.VOCAB}memory/decision-", body1["data"])
+        self.assertNotIn("[] a wz:", body1["data"])

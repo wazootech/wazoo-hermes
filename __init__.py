@@ -7,6 +7,7 @@ hybrid search for recall, and SPARQL for structural questions.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -55,12 +56,19 @@ def _turtle_escape(text: str) -> str:
     return text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\r", "").replace("\t", " ")
 
 
+def _memory_iri(kind: str, statement: str) -> str:
+    """Stable subject IRI: re-importing the same memory upserts instead of
+    duplicating (worlds-api blank-node imports are not idempotent, #177)."""
+    digest = hashlib.sha256(f"{kind}|{statement}".encode("utf-8")).hexdigest()[:16]
+    return f"<{VOCAB}memory/{kind}-{digest}>"
+
+
 def _memory_turtle(kind: str, statement: str, supersedes: str | None = None) -> str:
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     lines = [
         f"@prefix wz: <{VOCAB}> .",
         "@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .",
-        f"[] a wz:{kind} ;",
+        f"{_memory_iri(kind, statement)} a wz:{kind} ;",
         f'  wz:statement "{_turtle_escape(statement)}" ;',
     ]
     if supersedes:
