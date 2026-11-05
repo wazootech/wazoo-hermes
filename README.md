@@ -39,8 +39,16 @@ Two paths, both through `hermes memory setup wazoo` (or Hermes secrets):
   the provider provisions a world named after the profile, mints a scoped
   world token, and persists both to the profile `.env`.
 - **Self-hosted:** point `memory.wazoo.data_url` at your own worlds endpoint
-  (for example `http://localhost:8080`) and set `world_id`. No tokens needed;
-  requests go out without credentials.
+  (for example `http://localhost:8787`). No Wazoo account involved: mint a
+  namespace key from your own `WORLDS_API_ADMIN_KEY` once and set it as
+  `WORLDS_TOKEN` together with `world_id`.
+
+  ```
+  curl -s -X POST http://localhost:8787/api-keys \
+    -H "Authorization: Bearer $WORLDS_API_ADMIN_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{"name":"hermes","namespace":"local"}'
+  ```
 
 Optional `memory.wazoo` config keys: `data_url` (default
 `https://data.wazoo.dev`), `world_id`.

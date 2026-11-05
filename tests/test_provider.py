@@ -398,7 +398,7 @@ class TestLocalMode(unittest.TestCase):
         self.assertTrue(p._ready)
         self.assertEqual(p._world_id, "w_local")
 
-    def test_local_requests_send_no_auth_header(self):
+    def test_local_requests_send_no_auth_header_when_no_token(self):
         p = make_provider()
         p._world_token = ""
         p._data_url = "http://127.0.0.1:8080"
@@ -413,3 +413,23 @@ class TestLocalMode(unittest.TestCase):
         with mock.patch.object(wz._urlrequest, "urlopen", s):
             p.handle_tool_call("wazoo_search", {"query": "x"})
         self.assertEqual(s.calls[0][3].get("Authorization"), "Bearer wzw_test")
+
+
+class TestSelfHostedWithLocalKey(unittest.TestCase):
+    """Stock worlds-api always requires a Bearer key; self-hosted users mint a
+    local namespace key from their own admin key. The provider passes it through
+    as a normal token."""
+
+    def test_local_url_with_local_key_works_end_to_end(self):
+        _SECRETS.clear()
+        p = wz.WazooMemoryProvider()
+        p._data_url = "http://localhost:8787"
+        p._world_id = "w_local"
+        p._world_token = "wzw_local_key"
+        p._ready = True
+        s = _Scripted([("/import", {"imported": {"quads": 3, "chunks": 0}})])
+        with mock.patch.object(wz._urlrequest, "urlopen", s):
+            out = json.loads(p.handle_tool_call(
+                "wazoo_remember", {"kind": "decision", "statement": "local key works"}))
+        self.assertNotIn("error", out)
+        self.assertEqual(s.calls[0][3].get("Authorization"), "Bearer wzw_local_key")
