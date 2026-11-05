@@ -80,7 +80,7 @@ class _Scripted:
 
     def __call__(self, req, timeout=None):
         url = req.get_full_url()
-        self.calls.append((req.get_method(), url, (req.data or b"").decode()))
+        self.calls.append((req.get_method(), url, (req.data or b"").decode(), dict(req.headers)))
         for sub, payload in self.routes:
             if sub in url:
                 if isinstance(payload, Exception):
@@ -371,3 +371,45 @@ class TestSaveConfigSafety(unittest.TestCase):
         p.save_config({"world_id": "w_1"}, tmp)
         content = open(os.path.join(tmp, "config.yaml")).read()
         self.assertIn("w_old", content)  # dashboard-owned section untouched
+
+
+class TestLocalMode(unittest.TestCase):
+    def _cfg(self, monkey):
+        return {"data_url": monkey}
+
+    def test_local_url_available_without_secrets(self):
+        _SECRETS.clear()
+        p = wz.WazooMemoryProvider()
+        p._data_url = "http://localhost:8080"
+        with mock.patch.object(p, "_load_config_block", return_value={"data_url": "http://localhost:8080"}):
+            self.assertTrue(p.is_available())
+
+    def test_hosted_unavailable_without_secrets(self):
+        _SECRETS.clear()
+        p = wz.WazooMemoryProvider()
+        with mock.patch.object(p, "_load_config_block", return_value={}):
+            self.assertFalse(p.is_available())
+
+    def test_local_initialize_is_ready_without_token(self):
+        _SECRETS.clear()
+        p = wz.WazooMemoryProvider()
+        with mock.patch.object(p, "_load_config_block", return_value={"data_url": "http://127.0.0.1:8080", "world_id": "w_local"}):
+            p.initialize("s", hermes_home="/tmp")
+        self.assertTrue(p._ready)
+        self.assertEqual(p._world_id, "w_local")
+
+    def test_local_requests_send_no_auth_header(self):
+        p = make_provider()
+        p._world_token = ""
+        p._data_url = "http://127.0.0.1:8080"
+        s = _Scripted([("/search", {"results": []})])
+        with mock.patch.object(wz._urlrequest, "urlopen", s):
+            p.handle_tool_call("wazoo_search", {"query": "x"})
+        self.assertNotIn("Authorization", s.calls[0][3])
+
+    def test_hosted_requests_still_send_auth(self):
+        p = make_provider()  # token set, hosted url
+        s = _Scripted([("/search", {"results": []})])
+        with mock.patch.object(wz._urlrequest, "urlopen", s):
+            p.handle_tool_call("wazoo_search", {"query": "x"})
+        self.assertEqual(s.calls[0][3].get("Authorization"), "Bearer wzw_test")

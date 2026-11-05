@@ -71,7 +71,7 @@ def _memory_turtle(kind: str, statement: str, supersedes: str | None = None) -> 
 
 def _http_json(url: str, *, method: str = "GET", token: str = "", body: Any = None, timeout: float = 15.0) -> Any:
     headers = {"Accept": "application/json"}
-    if token:
+    if token:  # local/self-hosted worlds endpoints need no token
         headers["Authorization"] = f"Bearer {token}"
     data = None
     if body is not None:
@@ -149,12 +149,23 @@ class WazooMemoryProvider(MemoryProvider):
 
     # -- availability and setup ----------------------------------------------
 
+    @staticmethod
+    def _is_local_url(url: str) -> bool:
+        try:
+            host = _urlparse.urlparse(url).hostname or ""
+        except ValueError:
+            return False
+        return host in ("localhost", "127.0.0.1", "::1", "[::1]")
+
     def is_available(self) -> bool:
+        if self._is_local_url(self._load_config_block().get("data_url") or ""):
+            return True  # self-hosted worlds endpoint; no credentials needed
         return bool(get_secret("WORLDS_TOKEN") or get_secret("WAZOO_PLATFORM_TOKEN"))
 
     def unavailable_reason(self) -> str:
         return ("Set WORLDS_TOKEN (a wzw_ world token) or WAZOO_PLATFORM_TOKEN (a wzp_ platform token; "
-                "a world is provisioned automatically) in Hermes secrets, then run 'hermes memory setup wazoo'.")
+                "a world is provisioned automatically) in Hermes secrets, or point memory.wazoo.data_url "
+                "at a self-hosted worlds endpoint, then run 'hermes memory setup wazoo'.")
 
     def get_config_schema(self) -> list[dict[str, Any]]:
         return [
@@ -204,7 +215,8 @@ class WazooMemoryProvider(MemoryProvider):
         self._world_id = get_secret("WORLD_ID", "") or base.get("world_id", "")
         self._world_token = get_secret("WORLDS_TOKEN", "") or ""
         self._platform_token = get_secret("WAZOO_PLATFORM_TOKEN", "") or ""
-        self._ready = bool(self._world_token)
+        # Local/self-hosted endpoints need no token; hosted needs one (or provisions one).
+        self._ready = bool(self._world_token) or self._is_local_url(self._data_url)
         # Provision lazily on first use when only a platform token is present; never block startup.
         if not self._ready and self._platform_token:
             self._agent_label = self._agent_label or "agent"
