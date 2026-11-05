@@ -1,6 +1,7 @@
 """Tests for the wazoo memory provider. All HTTP goes through a scripted urllib."""
 
 import json
+import os
 import sys
 import unittest
 from unittest import mock
@@ -305,3 +306,68 @@ class TestQueuePrefetch(unittest.TestCase):
 def _err():
     from urllib.error import HTTPError
     return HTTPError("https://data.test", 500, "boom", {}, None)
+
+
+class TestRecallContract(unittest.TestCase):
+    def test_trivial_prompt_returns_cached_recall(self):
+        # The queue was filled for this turn before the user typed a trivial reply;
+        # returning it is correct and the status reflects what was injected.
+        p = make_provider()
+        with p._lock:
+            p._prefetch_result, p._prefetch_count = "- old fact", 3
+        self.assertEqual(p.prefetch("ok"), "[Wazoo memory]\n- old fact")
+        self.assertEqual(p.recall_status().count, 3)
+
+    def test_trivial_prompt_with_empty_cache_resets_count(self):
+        p = make_provider()
+        with p._lock:
+            p._prefetch_result, p._prefetch_count = "", 3
+        self.assertEqual(p.prefetch("ok"), "")
+        self.assertIsNone(p.recall_status())
+
+    def test_failed_inline_search_also_resets_count(self):
+        p = make_provider()
+        p._world_token = "wzw_dead"  # ready=True, but the search will fail
+        s = _Scripted([("/search", _err())])
+        with mock.patch.object(wz._urlrequest, "urlopen", s):
+            with p._lock:
+                p._prefetch_result, p._prefetch_count = "", 2
+            self.assertEqual(p.prefetch("real question"), "")
+        self.assertIsNone(p.recall_status())
+
+
+class TestSaveConfigSafety(unittest.TestCase):
+    def _write(self, tmp, text):
+        import os
+        os.makedirs(tmp, exist_ok=True)
+        path = os.path.join(tmp, "config.yaml")
+        if text is not None:
+            with open(path, "w") as fh:
+                fh.write(text)
+        return tmp
+
+    def test_appends_memory_block_when_absent(self):
+        import tempfile
+        tmp = self._write(tempfile.mkdtemp(), "model:\n  name: gpt\n")
+        p = wz.WazooMemoryProvider()
+        p.save_config({"world_id": "w_1", "data_url": "https://data.test"}, tmp)
+        content = open(os.path.join(tmp, "config.yaml")).read()
+        self.assertIn("memory:", content)
+        self.assertIn("wazoo:", content)
+        self.assertIn("world_id: w_1", content)
+
+    def test_skips_when_memory_block_exists(self):
+        import tempfile
+        tmp = self._write(tempfile.mkdtemp(), "memory:\n  provider: builtin\n")
+        p = wz.WazooMemoryProvider()
+        p.save_config({"world_id": "w_1"}, tmp)
+        content = open(os.path.join(tmp, "config.yaml")).read()
+        self.assertNotIn("wazoo", content)  # no duplicate/corrupted key
+
+    def test_idempotent_when_wazoo_already_present(self):
+        import tempfile
+        tmp = self._write(tempfile.mkdtemp(), "memory:\n  wazoo:\n    world_id: w_old\n")
+        p = wz.WazooMemoryProvider()
+        p.save_config({"world_id": "w_1"}, tmp)
+        content = open(os.path.join(tmp, "config.yaml")).read()
+        self.assertIn("w_old", content)  # dashboard-owned section untouched

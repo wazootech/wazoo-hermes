@@ -177,14 +177,19 @@ class WazooMemoryProvider(MemoryProvider):
                 with open(path, encoding="utf-8") as fh:
                     existing = fh.read()
             lines = [f"{k}: {v}" for k, v in sorted(section.items())]
-            block = "memory:\n  wazoo:\n" + "".join(f"    {line}\n" for line in lines)
-            marker = "  wazoo:"
-            if marker in existing:
+            block = "".join(f"    {line}\n" for line in lines)
+            if "  wazoo:" in existing:
                 return  # dashboard already persisted the section; do not fight it
+            if re.search(r"^memory:", existing, re.MULTILINE):
+                # A top-level memory: block already exists; hand-editing nested
+                # YAML without a parser risks corrupting it. The dashboard
+                # config panel owns section persistence in this case.
+                logger.debug("Wazoo save_config skipped: existing memory: block needs the dashboard")
+                return
             with open(path, "a", encoding="utf-8") as fh:
                 if existing and not existing.endswith("\n"):
                     fh.write("\n")
-                fh.write(block)
+                fh.write("memory:\n  wazoo:\n" + block)
         except OSError as exc:
             logger.debug("Wazoo save_config failed: %s", exc)
 
@@ -293,7 +298,11 @@ class WazooMemoryProvider(MemoryProvider):
         with self._lock:
             text, count = self._prefetch_result, self._prefetch_count
             self._prefetch_result = ""
-        if not text and self._ensure_ready() and query.strip() and not TRIVIAL_PROMPT_RE.match(query.strip()):
+        if not text and (not self._ensure_ready() or not query.strip() or TRIVIAL_PROMPT_RE.match(query.strip())):
+            with self._lock:
+                self._prefetch_count = 0
+            return ""
+        if not text:
             try:
                 data = _http_json(f"{self._data_url}/worlds/{self._world_id}/search", method="POST",
                                   token=self._world_token, body={"query": query[:512], "topK": 5}, timeout=6.0)
@@ -302,6 +311,7 @@ class WazooMemoryProvider(MemoryProvider):
                 text, count = ("\n".join(lines), len(lines)) if lines else ("", 0)
             except Exception as exc:
                 logger.debug("Wazoo inline prefetch failed: %s", exc)
+                count = 0  # a failed search injected nothing; never report a stale count
             with self._lock:
                 self._prefetch_count = count
         return f"[Wazoo memory]\n{text}" if text else ""
