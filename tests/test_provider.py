@@ -2,6 +2,7 @@
 
 import json
 import os
+import time
 import sys
 import unittest
 from unittest import mock
@@ -386,3 +387,77 @@ class TestPersistedState(unittest.TestCase):
         p = wz.WazooMemoryProvider()
         self.assertEqual(p._load_provisioned(tempfile.mkdtemp()), {})
         self.assertEqual(p._load_provisioned("/nonexistent-home"), {})
+
+
+class TestPrefetchBackpressure(unittest.TestCase):
+    """A query arriving while a recall is in flight must be requeued, not dropped."""
+
+    def test_second_query_runs_after_first_completes(self):
+        import threading
+        p = make_provider()
+        gate = threading.Event()
+        calls = []
+
+        bodies = []
+
+        class _Gate:
+            def __call__(self, req, timeout=None):
+                calls.append(req.get_full_url())
+                bodies.append((req.data or b"").decode())
+                gate.wait(2.0)
+                return _payload({"results": [{"content": f"hit {len(calls)}"}]})
+
+        def _payload(b):
+            return _RespShim(b)
+
+        with mock.patch.object(wz._urlrequest, "urlopen", _Gate()):
+            p.queue_prefetch("first question")
+            t1 = p._prefetch_thread
+            p.queue_prefetch("second question")
+            self.assertEqual(p._pending_query, "second question")
+            gate.set()
+            t1.join(3)
+            time.sleep(0.3)  # let the requeued worker start and finish
+            t2 = p._prefetch_thread
+            if t2 and t2 is not t1:
+                t2.join(3)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(p._pending_query, "")
+        self.assertIn("second question", bodies[1])
+
+    def test_same_query_parked_once_not_looped(self):
+        import threading
+        p = make_provider()
+        gate = threading.Event()
+        calls = []
+
+        class _Gate:
+            def __call__(self, req, timeout=None):
+                calls.append(req.get_full_url())
+                gate.wait(2.0)
+                return _RespShim({"results": []})
+
+        with mock.patch.object(wz._urlrequest, "urlopen", _Gate()):
+            p.queue_prefetch("same")
+            t1 = p._prefetch_thread
+            p.queue_prefetch("same")
+            gate.set()
+            t1.join(3)
+            time.sleep(0.3)
+        # same query was parked, requeued once, ran once more, no loop
+        self.assertLessEqual(len(calls), 3)
+        self.assertEqual(p._pending_query, "")
+
+
+class _RespShim:
+    def __init__(self, b):
+        self._b = json.dumps(b).encode()
+
+    def read(self):
+        return self._b
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False

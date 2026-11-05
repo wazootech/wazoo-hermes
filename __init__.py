@@ -164,6 +164,7 @@ class WazooMemoryProvider(MemoryProvider):
         self._prefetch_result = ""
         self._prefetch_count = 0
         self._prefetch_thread: threading.Thread | None = None
+        self._pending_query = ""
 
     @property
     def name(self) -> str:
@@ -282,7 +283,14 @@ class WazooMemoryProvider(MemoryProvider):
         if not self._ensure_ready() or not query.strip():
             return
         if self._prefetch_thread and self._prefetch_thread.is_alive():
+            # A recall is already in flight. Park this query behind it instead
+            # of dropping it: on rapid turns the newest question is the one the
+            # next prefetch should answer. The running worker requeues it.
+            self._pending_query = query[:512]
             return
+        self._start_prefetch(query, session_id)
+
+    def _start_prefetch(self, query: str, session_id: str) -> None:
         world_id, token, data_url = self._world_id, self._world_token, self._data_url
 
         def fetch() -> tuple[str, int]:
@@ -304,6 +312,13 @@ class WazooMemoryProvider(MemoryProvider):
                 return
             with self._lock:
                 self._prefetch_result, self._prefetch_count = text, count
+            # A query arrived while this recall was running; start it now.
+            # _start_prefetch, not queue_prefetch: the alive check would see
+            # this very thread and re-park the query forever.
+            pending = getattr(self, "_pending_query", "")
+            if pending:
+                self._pending_query = ""
+                self._start_prefetch(pending, session_id)
 
         self._prefetch_thread = spawn_context_thread(store, name="wazoo-prefetch")
         self._prefetch_thread.start()

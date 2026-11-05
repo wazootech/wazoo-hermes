@@ -2,17 +2,14 @@
 
 import argparse
 import json
-import os
-import sys
-from pathlib import Path
 
+from pathlib import Path
 
 def register_cli(subparsers: argparse._SubParsersAction) -> None:
     parser = subparsers.add_parser("wazoo", help="Wazoo memory provider status")
     sub = parser.add_subparsers(dest="wazoo_command")
     sub.add_parser("status", help="Show configured world and credential state")
     sub.add_parser("check", help="Run a search and a SPARQL count against the world")
-
 
 def _persisted_world():
     try:
@@ -23,14 +20,12 @@ def _persisted_world():
     except Exception:
         return {}
 
-
 def _config():
     try:
         from hermes_cli.config import load_config_readonly
         return (load_config_readonly().get("memory", {}).get("wazoo", {}) or {})
     except Exception:
         return {}
-
 
 def run_cli(args: argparse.Namespace) -> int:
     from agent.secret_scope import get_secret

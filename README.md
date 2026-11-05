@@ -37,7 +37,9 @@ Two paths, both through `hermes memory setup wazoo` (or Hermes secrets):
   token) and `WORLD_ID`. Get both from the Wazoo console.
 - **Zero-config:** set `WAZOO_PLATFORM_TOKEN` (a `wzp_` token). On first use
   the provider provisions a world named after the profile, mints a scoped
-  world token, and persists both to the profile `.env`.
+  world token, and persists both to `$HERMES_HOME/wazoo/world.json` (mode
+  0600). Explicit `WORLDS_TOKEN` / `WORLD_ID` secrets always win over the
+  state file.
 - **Self-hosted:** point `memory.wazoo.data_url` at your own worlds endpoint
   (for example `http://localhost:8787`). No Wazoo account involved: mint a
   namespace key from your own `WORLDS_API_ADMIN_KEY` once and set it as
