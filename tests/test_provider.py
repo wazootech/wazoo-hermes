@@ -337,133 +337,52 @@ class TestRecallContract(unittest.TestCase):
 
 
 class TestSaveConfigSafety(unittest.TestCase):
-    def _write(self, tmp, text):
-        import os
-        os.makedirs(tmp, exist_ok=True)
+    def test_save_config_is_noop_and_never_touches_config_yaml(self):
+        import tempfile, os
+        tmp = tempfile.mkdtemp()
         path = os.path.join(tmp, "config.yaml")
-        if text is not None:
-            with open(path, "w") as fh:
-                fh.write(text)
-        return tmp
-
-    def test_appends_memory_block_when_absent(self):
-        import tempfile
-        tmp = self._write(tempfile.mkdtemp(), "model:\n  name: gpt\n")
-        p = wz.WazooMemoryProvider()
-        p.save_config({"world_id": "w_1", "data_url": "https://data.test"}, tmp)
-        content = open(os.path.join(tmp, "config.yaml")).read()
-        self.assertIn("memory:", content)
-        self.assertIn("wazoo:", content)
-        self.assertIn("world_id: w_1", content)
-
-    def test_skips_when_memory_block_exists(self):
-        import tempfile
-        tmp = self._write(tempfile.mkdtemp(), "memory:\n  provider: builtin\n")
+        with open(path, "w") as fh:
+            fh.write("model:\n  name: gpt\n")
+        before = open(path).read()
         p = wz.WazooMemoryProvider()
         p.save_config({"world_id": "w_1"}, tmp)
-        content = open(os.path.join(tmp, "config.yaml")).read()
-        self.assertNotIn("wazoo", content)  # no duplicate/corrupted key
+        self.assertEqual(open(path).read(), before)  # core owns persistence
 
-    def test_idempotent_when_wazoo_already_present(self):
+
+class TestPersistedState(unittest.TestCase):
+    """Provisioned ids live in the plugin-owned state file (0600), not .env."""
+
+    def test_save_then_initialize_reads_state_file(self):
+        import tempfile, os, stat
+        tmp = tempfile.mkdtemp()
+        p = wz.WazooMemoryProvider()
+        p._save_provisioned(tmp, "w_state", "wzw_state")
+        path = os.path.join(tmp, "wazoo", "world.json")
+        self.assertTrue(os.path.exists(path))
+        mode = stat.S_IMODE(os.stat(path).st_mode)
+        self.assertEqual(mode & 0o077, 0)  # owner-only
+
+        _SECRETS.clear()
+        p2 = wz.WazooMemoryProvider()
+        p2.initialize("s", hermes_home=tmp, platform="cli")
+        self.assertEqual(p2._world_id, "w_state")
+        self.assertEqual(p2._world_token, "wzw_state")
+        self.assertTrue(p2._ready)
+
+    def test_secrets_win_over_state_file(self):
         import tempfile
-        tmp = self._write(tempfile.mkdtemp(), "memory:\n  wazoo:\n    world_id: w_old\n")
+        tmp = tempfile.mkdtemp()
         p = wz.WazooMemoryProvider()
-        p.save_config({"world_id": "w_1"}, tmp)
-        content = open(os.path.join(tmp, "config.yaml")).read()
-        self.assertIn("w_old", content)  # dashboard-owned section untouched
-
-
-class TestLocalMode(unittest.TestCase):
-    def _cfg(self, monkey):
-        return {"data_url": monkey}
-
-    def test_local_url_available_without_secrets(self):
+        p._save_provisioned(tmp, "w_state", "wzw_state")
+        _SECRETS["WORLDS_TOKEN"] = "wzw_env"
+        _SECRETS["WORLD_ID"] = "w_env"
+        p2 = wz.WazooMemoryProvider()
+        p2.initialize("s", hermes_home=tmp, platform="cli")
+        self.assertEqual((p2._world_id, p2._world_token), ("w_env", "wzw_env"))
         _SECRETS.clear()
+
+    def test_missing_state_file_is_fine(self):
+        import tempfile
         p = wz.WazooMemoryProvider()
-        p._data_url = "http://localhost:8080"
-        with mock.patch.object(p, "_load_config_block", return_value={"data_url": "http://localhost:8080"}):
-            self.assertTrue(p.is_available())
-
-    def test_hosted_unavailable_without_secrets(self):
-        _SECRETS.clear()
-        p = wz.WazooMemoryProvider()
-        with mock.patch.object(p, "_load_config_block", return_value={}):
-            self.assertFalse(p.is_available())
-
-    def test_local_initialize_is_ready_without_token(self):
-        _SECRETS.clear()
-        p = wz.WazooMemoryProvider()
-        with mock.patch.object(p, "_load_config_block", return_value={"data_url": "http://127.0.0.1:8080", "world_id": "w_local"}):
-            p.initialize("s", hermes_home="/tmp")
-        self.assertTrue(p._ready)
-        self.assertEqual(p._world_id, "w_local")
-
-    def test_local_requests_send_no_auth_header_when_no_token(self):
-        p = make_provider()
-        p._world_token = ""
-        p._data_url = "http://127.0.0.1:8080"
-        s = _Scripted([("/search", {"results": []})])
-        with mock.patch.object(wz._urlrequest, "urlopen", s):
-            p.handle_tool_call("wazoo_search", {"query": "x"})
-        self.assertNotIn("Authorization", s.calls[0][3])
-
-    def test_hosted_requests_still_send_auth(self):
-        p = make_provider()  # token set, hosted url
-        s = _Scripted([("/search", {"results": []})])
-        with mock.patch.object(wz._urlrequest, "urlopen", s):
-            p.handle_tool_call("wazoo_search", {"query": "x"})
-        self.assertEqual(s.calls[0][3].get("Authorization"), "Bearer wzw_test")
-
-
-class TestSelfHostedWithLocalKey(unittest.TestCase):
-    """Stock worlds-api always requires a Bearer key; self-hosted users mint a
-    local namespace key from their own admin key. The provider passes it through
-    as a normal token."""
-
-    def test_local_url_with_local_key_works_end_to_end(self):
-        _SECRETS.clear()
-        p = wz.WazooMemoryProvider()
-        p._data_url = "http://localhost:8787"
-        p._world_id = "w_local"
-        p._world_token = "wzw_local_key"
-        p._ready = True
-        s = _Scripted([("/import", {"imported": {"quads": 3, "chunks": 0}})])
-        with mock.patch.object(wz._urlrequest, "urlopen", s):
-            out = json.loads(p.handle_tool_call(
-                "wazoo_remember", {"kind": "decision", "statement": "local key works"}))
-        self.assertNotIn("error", out)
-        self.assertEqual(s.calls[0][3].get("Authorization"), "Bearer wzw_local_key")
-
-
-class TestIdempotentRemember(unittest.TestCase):
-    """worlds-api blank-node imports accumulate duplicates (#177); the provider
-    must use stable subject IRIs so retries and repeats upsert."""
-
-    def test_same_statement_produces_identical_triples(self):
-        t1 = wz._memory_turtle("decision", "ship on Tuesdays")
-        t2 = wz._memory_turtle("decision", "ship on Tuesdays")
-        self.assertEqual(t1, t2)
-        self.assertIn(f"<{wz.VOCAB}memory/decision-", t1)
-        self.assertNotIn("[] a wz:", t1)
-
-    def test_different_kind_same_statement_is_distinct(self):
-        t1 = wz._memory_turtle("decision", "x")
-        t2 = wz._memory_turtle("preference", "x")
-        self.assertNotEqual(t1, t2)
-
-    def test_repeated_remember_does_not_duplicate(self):
-        p = make_provider()
-        s = _Scripted([("/import", {"imported": {"quads": 3, "chunks": 0}}),
-                       ("/import", {"imported": {"quads": 3, "chunks": 0}}),
-                       ("/sparql", {"head": {"vars": ["n"]},
-                                    "results": {"bindings": [{"n": {"type": "literal", "value": "3"}}]}})])
-        with mock.patch.object(wz._urlrequest, "urlopen", s):
-            p.handle_tool_call("wazoo_remember", {"kind": "decision", "statement": "same fact"})
-            p.handle_tool_call("wazoo_remember", {"kind": "decision", "statement": "same fact"})
-            out = json.loads(p.handle_tool_call("wazoo_memories", {"kind": "decision", "limit": 10}))
-        body1 = json.loads(s.calls[0][2])
-        body2 = json.loads(s.calls[1][2])
-        # both imports sent the IDENTICAL document (same subject IRI)
-        self.assertEqual(body1["data"], body2["data"])
-        self.assertIn(f"<{wz.VOCAB}memory/decision-", body1["data"])
-        self.assertNotIn("[] a wz:", body1["data"])
+        self.assertEqual(p._load_provisioned(tempfile.mkdtemp()), {})
+        self.assertEqual(p._load_provisioned("/nonexistent-home"), {})

@@ -14,6 +14,7 @@ import os
 import re
 import threading
 import time
+from pathlib import Path
 from typing import Any, Callable
 from urllib import request as _urlrequest
 from urllib import parse as _urlparse
@@ -47,6 +48,19 @@ TRIVIAL_PROMPT_RE = re.compile(
     r"[\s!?.:;,\"'~\u2018\u2019\u201c\u201d\u2014\u2013\u2026()\[\]{}<>*&^%$#@!+=`\u00a0]*$",
     re.IGNORECASE,
 )
+
+# Module-level config schema: the setup wizard and dashboard load CONFIG_SCHEMA
+# directly; get_config_schema() returns it. Core owns persistence.
+CONFIG_SCHEMA = [
+    {"key": "world_token", "description": "Wazoo world token (wzw_)", "secret": True, "required": False,
+     "env_var": "WORLDS_TOKEN", "url": "https://wazoo.dev"},
+    {"key": "platform_token", "description": "Wazoo platform token (wzp_); provisions a world automatically",
+     "secret": True, "required": False, "env_var": "WAZOO_PLATFORM_TOKEN", "url": "https://wazoo.dev"},
+    {"key": "world_id", "description": "World id (w_...); optional with a world token, ignored when provisioning",
+     "default": ""},
+    {"key": "data_url", "description": "Worlds data-plane endpoint", "default": DEFAULT_DATA_URL},
+]
+
 
 def _looks_like_secret(text: str) -> bool:
     return any(p.search(text) for p in SECRET_PATTERNS)
@@ -176,41 +190,12 @@ class WazooMemoryProvider(MemoryProvider):
                 "at a self-hosted worlds endpoint, then run 'hermes memory setup wazoo'.")
 
     def get_config_schema(self) -> list[dict[str, Any]]:
-        return [
-            {"key": "world_token", "description": "Wazoo world token (wzw_)", "secret": True, "required": False,
-             "env_var": "WORLDS_TOKEN", "url": "https://wazoo.dev"},
-            {"key": "platform_token", "description": "Wazoo platform token (wzp_); provisions a world automatically",
-             "secret": True, "required": False, "env_var": "WAZOO_PLATFORM_TOKEN", "url": "https://wazoo.dev"},
-            {"key": "world_id", "description": "World id (w_...); optional with a world token, ignored when provisioning",
-             "default": ""},
-            {"key": "data_url", "description": "Worlds data-plane endpoint", "default": DEFAULT_DATA_URL},
-        ]
+        return CONFIG_SCHEMA
 
     def save_config(self, values: dict[str, Any], hermes_home: str) -> None:
-        """Non-secret fields land in config.yaml under memory.wazoo (secret fields go to .env)."""
-        path = os.path.join(hermes_home, "config.yaml")
-        section = {k: str(v) for k, v in values.items() if v and k not in ("world_token", "platform_token")}
-        try:
-            existing = ""
-            if os.path.exists(path):
-                with open(path, encoding="utf-8") as fh:
-                    existing = fh.read()
-            lines = [f"{k}: {v}" for k, v in sorted(section.items())]
-            block = "".join(f"    {line}\n" for line in lines)
-            if "  wazoo:" in existing:
-                return  # dashboard already persisted the section; do not fight it
-            if re.search(r"^memory:", existing, re.MULTILINE):
-                # A top-level memory: block already exists; hand-editing nested
-                # YAML without a parser risks corrupting it. The dashboard
-                # config panel owns section persistence in this case.
-                logger.debug("Wazoo save_config skipped: existing memory: block needs the dashboard")
-                return
-            with open(path, "a", encoding="utf-8") as fh:
-                if existing and not existing.endswith("\n"):
-                    fh.write("\n")
-                fh.write("memory:\n  wazoo:\n" + block)
-        except OSError as exc:
-            logger.debug("Wazoo save_config failed: %s", exc)
+        """No-op: core owns config persistence. Non-secret values live in the
+        memory.wazoo section the setup wizard/dashboard already writes; the
+        provisioned world id/token live in the plugin-owned state file."""
 
     # -- lifecycle ------------------------------------------------------------
 
@@ -220,9 +205,12 @@ class WazooMemoryProvider(MemoryProvider):
         # Non-secret config from config.yaml memory.wazoo; secrets from the scoped store.
         base = self._load_config_block()
         self._data_url = (base.get("data_url") or DEFAULT_DATA_URL).rstrip("/")
-        self._world_id = get_secret("WORLD_ID", "") or base.get("world_id", "")
-        self._world_token = get_secret("WORLDS_TOKEN", "") or ""
+        home = str(kwargs.get("hermes_home", "") or "")
+        persisted = self._load_provisioned(home) if home else {}
+        self._world_id = get_secret("WORLD_ID", "") or base.get("world_id", "") or persisted.get("world_id", "")
+        self._world_token = get_secret("WORLDS_TOKEN", "") or persisted.get("world_token", "")
         self._platform_token = get_secret("WAZOO_PLATFORM_TOKEN", "") or ""
+        self._home = home
         # Local/self-hosted endpoints need no token; hosted needs one (or provisions one).
         self._ready = bool(self._world_token) or self._is_local_url(self._data_url)
         # Provision lazily on first use when only a platform token is present; never block startup.
@@ -254,25 +242,32 @@ class WazooMemoryProvider(MemoryProvider):
             self._world_id, self._world_token = world_id, world_token
             self._ready = True
             # Persist the minted ids so restarts reuse the same world.
-            _quiet("persist ids", lambda: self._save_provisioned(world_id, world_token))
+            _quiet("persist ids", lambda: self._save_provisioned(self._home, world_id, world_token))
             return True
 
-    def _save_provisioned(self, world_id: str, world_token: str) -> None:
-        from hermes_constants import get_hermes_home
-        home = get_hermes_home()
-        env_path = os.path.join(home, ".env")
-        lines = [f"WORLDS_TOKEN={world_token}", f"WAZOO_WORLD_ID={world_id}"]
-        existing = ""
-        if os.path.exists(env_path):
-            with open(env_path, encoding="utf-8") as fh:
-                existing = fh.read()
-        have = {line.split("=", 1)[0] for line in existing.splitlines() if "=" in line}
-        add = [line for line in lines if line.split("=", 1)[0] not in have]
-        if add:
-            with open(env_path, "a", encoding="utf-8") as fh:
-                if existing and not existing.endswith("\n"):
-                    fh.write("\n")
-                fh.write("\n".join(add) + "\n")
+    _STATE_PATH = "wazoo/world.json"
+
+    def _state_file(self, hermes_home: str) -> Path:
+        return Path(hermes_home) / self._STATE_PATH
+
+    def _save_provisioned(self, hermes_home: str, world_id: str, world_token: str) -> None:
+        """Persist the provisioned ids in the plugin's own file (0600), NOT the
+        profile .env: credentials belong in scoped secrets or here, and hand-
+        editing shared dotfiles from a plugin is out of bounds."""
+        path = self._state_file(hermes_home)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = json.dumps({"world_id": world_id, "world_token": world_token}, indent=2) + "\n"
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(payload)
+
+    def _load_provisioned(self, hermes_home: str) -> dict[str, str]:
+        path = self._state_file(hermes_home)
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            return {k: str(data[k]) for k in ("world_id", "world_token") if data.get(k)}
+        except (OSError, ValueError, KeyError):
+            return {}
 
     # -- system prompt and recall ----------------------------------------------
 
