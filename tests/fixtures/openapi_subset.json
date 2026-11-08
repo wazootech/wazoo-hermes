@@ -1,0 +1,357 @@
+{
+  "wazoo-api POST /v1/worlds": {
+    "request": {
+      "application/json": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "ownerEmail": {
+            "type": "string"
+          },
+          "world": {
+            "additionalProperties": false,
+            "properties": {
+              "displayName": {
+                "type": "string"
+              },
+              "region": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "displayName"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "world"
+        ],
+        "type": "object"
+      }
+    },
+    "responses": {
+      "201": {
+        "application/json": {
+          "properties": {
+            "world": {
+              "properties": {
+                "backend": {
+                  "enum": [
+                    "worlds-api"
+                  ],
+                  "type": "string"
+                },
+                "createTime": {
+                  "type": "string"
+                },
+                "deleteTime": {
+                  "type": "string"
+                },
+                "displayName": {
+                  "type": "string"
+                },
+                "expireTime": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "region": {
+                  "type": "string"
+                },
+                "restorable": {
+                  "type": "boolean"
+                },
+                "state": {
+                  "enum": [
+                    "ACTIVE",
+                    "SUSPENDED",
+                    "DELETED"
+                  ],
+                  "type": "string"
+                },
+                "updateTime": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "displayName",
+                "region",
+                "state",
+                "restorable",
+                "backend"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "world"
+          ],
+          "type": "object"
+        }
+      }
+    }
+  },
+  "wazoo-api POST /v1/worlds/{worldId}/auth/tokens": {
+    "request": {
+      "application/json": {
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "responses": {
+      "201": {
+        "application/json": {
+          "properties": {
+            "token": {
+              "properties": {
+                "createTime": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "namespace": {
+                  "type": "string"
+                },
+                "scopes": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "uid": {
+                  "type": "string"
+                },
+                "worldId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "uid",
+                "name"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "token"
+          ],
+          "type": "object"
+        }
+      }
+    }
+  },
+  "worlds-api POST /worlds/{worldId}/import": {
+    "request": {
+      "application/json": {
+        "properties": {
+          "contentType": {
+            "type": "string"
+          },
+          "data": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      }
+    },
+    "responses": {
+      "200": {
+        "application/json": {
+          "properties": {
+            "imported": {
+              "properties": {
+                "chunks": {
+                  "type": "integer"
+                },
+                "quads": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "quads",
+                "chunks"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "imported"
+          ],
+          "type": "object"
+        }
+      }
+    }
+  },
+  "worlds-api POST /worlds/{worldId}/search": {
+    "request": {
+      "application/json": {
+        "properties": {
+          "filter": {
+            "properties": {
+              "exclude": {
+                "properties": {
+                  "graphs": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "predicates": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "subjects": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "type": "object"
+              },
+              "include": {
+                "properties": {
+                  "graphs": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "predicates": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "subjects": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "type": "object"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "minScore": {
+            "type": "number"
+          },
+          "query": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      }
+    },
+    "responses": {
+      "200": {
+        "application/json": {
+          "properties": {
+            "mode": {
+              "enum": [
+                "semantic",
+                "keyword",
+                "hybrid",
+                "fallback"
+              ],
+              "type": "string"
+            },
+            "results": {
+              "items": {
+                "properties": {
+                  "content": {
+                    "type": "string"
+                  },
+                  "graph": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "predicate": {
+                    "type": "string"
+                  },
+                  "score": {
+                    "nullable": true,
+                    "type": "number"
+                  },
+                  "scoreType": {
+                    "enum": [
+                      "rrf",
+                      "cosine",
+                      "unranked"
+                    ],
+                    "type": "string"
+                  },
+                  "subject": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "subject",
+                  "predicate",
+                  "content",
+                  "score",
+                  "scoreType"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "results",
+            "mode"
+          ],
+          "type": "object"
+        }
+      }
+    }
+  },
+  "worlds-api POST /worlds/{worldId}/sparql": {
+    "request": {
+      "application/json": {
+        "properties": {
+          "query": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      }
+    },
+    "responses": {
+      "200": {
+        "application/json": {
+          "nullable": true
+        }
+      }
+    }
+  }
+}

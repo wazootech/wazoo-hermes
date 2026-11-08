@@ -332,7 +332,7 @@ class WazooMemoryProvider(MemoryProvider):
 
         def fetch() -> tuple[str, int]:
             data = _http_json(f"{data_url}/worlds/{world_id}/search", method="POST", token=token,
-                              body={"query": query[:512], "topK": 5})
+                              body={"query": query[:512], "limit": 5})
             results = (data or {}).get("results") or []
             lines = []
             for r in results[:5]:
@@ -372,7 +372,7 @@ class WazooMemoryProvider(MemoryProvider):
         if not text:
             try:
                 data = _http_json(f"{self._data_url}/worlds/{self._world_id}/search", method="POST",
-                                  token=self._world_token, body={"query": query[:512], "topK": 5}, timeout=6.0)
+                                  token=self._world_token, body={"query": query[:512], "limit": 5}, timeout=6.0)
                 results = (data or {}).get("results") or []
                 lines = [f"- {r.get('content')}" for r in results[:5] if r.get("content")]
                 text, count = ("\n".join(lines), len(lines)) if lines else ("", 0)
@@ -426,7 +426,7 @@ class WazooMemoryProvider(MemoryProvider):
                 return {"error": "query is required"}
             top_k = max(1, min(int(args.get("top_k", 5) or 5), 25))
             data = _http_json(f"{self._data_url}/worlds/{self._world_id}/search", method="POST",
-                              token=self._world_token, body={"query": query, "topK": top_k})
+                              token=self._world_token, body={"query": query, "limit": top_k})
             results = [{"content": r.get("content"), "subject": r.get("subject"), "score": r.get("score")}
                        for r in (data or {}).get("results") or []]
             return {"results": results}

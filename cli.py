@@ -65,7 +65,7 @@ def run_cli(args: argparse.Namespace) -> int:
                             method="POST")
             with req.urlopen(r, timeout=15) as res:
                 return json.loads(res.read())
-        search = post("/search", {"query": "the", "topK": 3})
+        search = post("/search", {"query": "the", "limit": 3})
         sparql = post("/sparql", {"query": "SELECT (COUNT(?s) AS ?n) WHERE { ?s ?p ?o }"})
         n = sparql.get("results", {}).get("bindings", [{}])[0].get("n", {}).get("value", "?")
         print(f"search results: {len(search.get('results', []))}")

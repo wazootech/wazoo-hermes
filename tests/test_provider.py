@@ -152,7 +152,7 @@ class TestSearchAndSparql(unittest.TestCase):
         with mock.patch.object(wz._urlrequest, "urlopen", s):
             out = json.loads(p.handle_tool_call("wazoo_search", {"query": "Ethan", "top_k": 3}))
         self.assertEqual(out["results"][0]["content"], "Ethan Davidson")
-        self.assertIn('"topK": 3', s.calls[0][2])
+        self.assertIn('"limit": 3', s.calls[0][2])
 
     def test_sparql_returns_rows(self):
         p = make_provider()

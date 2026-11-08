@@ -76,10 +76,18 @@ SELECT ?kind ?statement ?when WHERE {
 ## Development
 
 ```
-python3 -m unittest discover tests
+python3 -m unittest discover tests     # unit + OpenAPI contract tests
+python3 tests/sync_openapi.py          # refresh the OpenAPI subset fixture
 ```
 
 The test suite stubs the Hermes host modules, so it runs without a Hermes
-install. HTTP is scripted per test; no network in CI.
+install. HTTP is scripted per test, so the tests make no network calls.
+
+The provider talks to worlds-api and wazoo-api over plain HTTP, with no
+generated client. `tests/test_contract.py` checks every request body and every
+response field the provider reads against `tests/fixtures/openapi_subset.json`,
+a trimmed copy of both services' published OpenAPI specs. CI also runs
+`sync_openapi.py --check` (on pushes, pull requests and weekly), which fetches
+the live specs and fails when the copy falls behind.
 
 Apache-2.0
