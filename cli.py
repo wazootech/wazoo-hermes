@@ -21,11 +21,19 @@ def _persisted_world():
         return {}
 
 def _config():
+    cfg = {}
     try:
         from hermes_cli.config import load_config_readonly
-        return (load_config_readonly().get("memory", {}).get("wazoo", {}) or {})
+        cfg = dict(load_config_readonly().get("memory", {}).get("wazoo", {}) or {})
     except Exception:
-        return {}
+        pass
+    try:  # setup values saved by the provider override config.yaml
+        from hermes_constants import get_hermes_home
+        saved = json.loads((Path(get_hermes_home()) / "wazoo" / "config.json").read_text(encoding="utf-8"))
+        cfg.update({k: v for k, v in saved.items() if k in ("world_id", "data_url") and v})
+    except Exception:
+        pass
+    return cfg
 
 def run_cli(args: argparse.Namespace) -> int:
     from agent.secret_scope import get_secret

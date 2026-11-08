@@ -52,8 +52,10 @@ Two paths, both through `hermes memory setup wazoo` (or Hermes secrets):
     -d '{"name":"hermes","namespace":"local"}'
   ```
 
-Optional `memory.wazoo` config keys: `data_url` (default
-`https://data.wazoo.dev`), `world_id`.
+Optional config keys: `data_url` (default `https://data.wazoo.dev`),
+`world_id`. `hermes memory setup wazoo` saves them to
+`$HERMES_HOME/wazoo/config.json`, which overrides a hand-written
+`memory.wazoo` section in `config.yaml`. Tokens are never written there.
 
 ## Why an RDF graph for agent memory
 

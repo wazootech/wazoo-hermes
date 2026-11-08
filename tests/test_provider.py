@@ -337,17 +337,53 @@ class TestRecallContract(unittest.TestCase):
         self.assertIsNone(p.recall_status())
 
 
-class TestSaveConfigSafety(unittest.TestCase):
-    def test_save_config_is_noop_and_never_touches_config_yaml(self):
-        import tempfile, os
-        tmp = tempfile.mkdtemp()
-        path = os.path.join(tmp, "config.yaml")
+class TestSaveConfig(unittest.TestCase):
+    """Setup keeps non-secret fields only through save_config (CLI wizard and
+    dashboard), so it must persist world_id and data_url."""
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.mkdtemp()
+        _SECRETS.clear()
+
+    def test_persists_setup_values_without_memory_wazoo_block(self):
+        # No config.yaml memory.wazoo section exists (hermes_cli is absent here).
+        p = wz.WazooMemoryProvider()
+        p.save_config({"world_id": "w_self", "data_url": "http://localhost:8787"}, self.tmp)
+        path = os.path.join(self.tmp, "wazoo", "config.json")
+        self.assertEqual(json.load(open(path)), {"world_id": "w_self", "data_url": "http://localhost:8787"})
+        p2 = wz.WazooMemoryProvider()
+        p2.initialize("s", hermes_home=self.tmp, platform="cli")
+        self.assertEqual(p2._data_url, "http://localhost:8787")  # not the hosted default
+        self.assertEqual(p2._world_id, "w_self")
+
+    def test_self_hosted_token_never_goes_to_hosted_cloud(self):
+        p = wz.WazooMemoryProvider()
+        p.save_config({"world_id": "w_self", "data_url": "https://worlds.example.internal"}, self.tmp)
+        _SECRETS["WORLDS_TOKEN"] = "wzw_self"
+        p2 = wz.WazooMemoryProvider()
+        p2.initialize("s", hermes_home=self.tmp, platform="cli")
+        s = _Scripted([("/search", {"results": []})])
+        with mock.patch.object(wz._urlrequest, "urlopen", s):
+            p2.handle_tool_call("wazoo_search", {"query": "x"})
+        self.assertTrue(s.calls[0][1].startswith("https://worlds.example.internal/"))
+        _SECRETS.clear()
+
+    def test_never_writes_secrets_and_merges_partial_saves(self):
+        p = wz.WazooMemoryProvider()
+        p.save_config({"data_url": "http://localhost:8787"}, self.tmp)
+        p.save_config({"world_id": "w_2", "world_token": "wzw_leak", "platform_token": "wzp_leak"}, self.tmp)
+        raw = open(os.path.join(self.tmp, "wazoo", "config.json")).read()
+        self.assertNotIn("leak", raw)
+        self.assertEqual(json.loads(raw), {"data_url": "http://localhost:8787", "world_id": "w_2"})
+
+    def test_never_touches_config_yaml(self):
+        path = os.path.join(self.tmp, "config.yaml")
         with open(path, "w") as fh:
             fh.write("model:\n  name: gpt\n")
         before = open(path).read()
-        p = wz.WazooMemoryProvider()
-        p.save_config({"world_id": "w_1"}, tmp)
-        self.assertEqual(open(path).read(), before)  # core owns persistence
+        wz.WazooMemoryProvider().save_config({"world_id": "w_1"}, self.tmp)
+        self.assertEqual(open(path).read(), before)
 
 
 class TestPersistedState(unittest.TestCase):

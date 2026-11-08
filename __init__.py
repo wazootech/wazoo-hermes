@@ -50,7 +50,8 @@ TRIVIAL_PROMPT_RE = re.compile(
 )
 
 # Module-level config schema: the setup wizard and dashboard load CONFIG_SCHEMA
-# directly; get_config_schema() returns it. Core owns persistence.
+# directly; get_config_schema() returns it. Secrets go to core's scoped store;
+# non-secret fields persist through save_config to $HERMES_HOME/wazoo/config.json.
 CONFIG_SCHEMA = [
     {"key": "world_token", "description": "Wazoo world token (wzw_)", "secret": True, "required": False,
      "env_var": "WORLDS_TOKEN", "url": "https://wazoo.dev"},
@@ -193,20 +194,42 @@ class WazooMemoryProvider(MemoryProvider):
     def get_config_schema(self) -> list[dict[str, Any]]:
         return CONFIG_SCHEMA
 
+    _CONFIG_PATH = "wazoo/config.json"
+    _CONFIG_KEYS = ("world_id", "data_url")  # non-secret schema fields only
+
     def save_config(self, values: dict[str, Any], hermes_home: str) -> None:
-        """No-op: core owns config persistence. Non-secret values live in the
-        memory.wazoo section the setup wizard/dashboard already writes; the
-        provisioned world id/token live in the plugin-owned state file."""
+        """Persist non-secret setup values (world_id, data_url) to the
+        provider's own file, $HERMES_HOME/wazoo/config.json. The CLI setup
+        wizard and the dashboard both keep non-secret fields only through this
+        hook, so a no-op would drop a self-hosted data_url and send its token
+        to the hosted cloud. Secrets are never written here."""
+        if not hermes_home:
+            return
+        path = Path(hermes_home) / self._CONFIG_PATH
+        merged = self._read_json(path)
+        for key in self._CONFIG_KEYS:
+            if key in values and values[key] is not None:
+                merged[key] = str(values[key]).strip()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8")
+
+    @staticmethod
+    def _read_json(path: Path) -> dict[str, str]:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            return {k: str(v).strip() for k, v in data.items()} if isinstance(data, dict) else {}
+        except (OSError, ValueError):
+            return {}
 
     # -- lifecycle ------------------------------------------------------------
 
     def initialize(self, session_id: str, **kwargs) -> None:
         self._session_id = session_id
         self._agent_label = str(kwargs.get("agent_identity") or "agent")
-        # Non-secret config from config.yaml memory.wazoo; secrets from the scoped store.
-        base = self._load_config_block()
-        self._data_url = (base.get("data_url") or DEFAULT_DATA_URL).rstrip("/")
+        # Non-secret config from the provider file / memory.wazoo; secrets from the scoped store.
         home = str(kwargs.get("hermes_home", "") or "")
+        base = self._load_config_block(home)
+        self._data_url = (base.get("data_url") or DEFAULT_DATA_URL).rstrip("/")
         persisted = self._load_provisioned(home) if home else {}
         self._world_id = get_secret("WORLD_ID", "") or base.get("world_id", "") or persisted.get("world_id", "")
         self._world_token = get_secret("WORLDS_TOKEN", "") or persisted.get("world_token", "")
@@ -218,13 +241,26 @@ class WazooMemoryProvider(MemoryProvider):
         if not self._ready and self._platform_token:
             self._agent_label = self._agent_label or "agent"
 
-    def _load_config_block(self) -> dict[str, str]:
+    def _load_config_block(self, hermes_home: str = "") -> dict[str, str]:
+        """memory.wazoo from config.yaml, overlaid by what setup saved to
+        $HERMES_HOME/wazoo/config.json (the provider's native config)."""
+        block: dict[str, str] = {}
         try:
             from hermes_cli.config import load_config_readonly
-            block = load_config_readonly().get("memory", {}).get("wazoo", {})
-            return {k: str(v).strip() for k, v in block.items()} if isinstance(block, dict) else {}
+            raw = load_config_readonly().get("memory", {}).get("wazoo", {})
+            if isinstance(raw, dict):
+                block = {k: str(v).strip() for k, v in raw.items()}
         except Exception:
-            return {}
+            pass
+        if not hermes_home:
+            try:
+                from hermes_constants import get_hermes_home
+                hermes_home = str(get_hermes_home())
+            except Exception:
+                return block
+        saved = self._read_json(Path(hermes_home) / self._CONFIG_PATH)
+        block.update({k: v for k, v in saved.items() if k in self._CONFIG_KEYS and v})
+        return block
 
     def _ensure_ready(self) -> bool:
         """Resolve credentials; provision once when only a platform token is set."""
