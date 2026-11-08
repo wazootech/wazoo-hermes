@@ -275,6 +275,35 @@ class TestAvailability(unittest.TestCase):
         self.assertFalse(wz.WazooMemoryProvider().is_available())
         self.assertIn("WORLDS_TOKEN", wz.WazooMemoryProvider().unavailable_reason())
 
+    def _with_config(self, cfg):
+        return mock.patch.object(wz.WazooMemoryProvider, "_load_config_block", return_value=dict(cfg))
+
+    def test_localhost_alone_is_not_a_credential(self):
+        # No hostname guessing: worlds-api requires a key unless the server says otherwise.
+        _SECRETS.clear()
+        with self._with_config({"data_url": "http://localhost:8787"}):
+            self.assertFalse(wz.WazooMemoryProvider().is_available())
+
+    def test_default_endpoint_with_world_id_still_needs_token(self):
+        _SECRETS.clear()
+        with self._with_config({"data_url": wz.DEFAULT_DATA_URL, "world_id": "w_1"}):
+            self.assertFalse(wz.WazooMemoryProvider().is_available())
+
+    def test_custom_endpoint_with_world_is_tokenless(self):
+        _SECRETS.clear()
+        cfg = {"data_url": "http://localhost:8787", "world_id": "w_local"}
+        with self._with_config(cfg):
+            p = wz.WazooMemoryProvider()
+            self.assertTrue(p.is_available())
+            p.initialize("s", platform="cli")
+        self.assertTrue(p._ready)
+        s = _Scripted([("/search", {"results": []})])
+        with mock.patch.object(wz._urlrequest, "urlopen", s):
+            p.handle_tool_call("wazoo_search", {"query": "x"})
+        method, url, _body, headers = s.calls[0]
+        self.assertEqual(url, "http://localhost:8787/worlds/w_local/search")
+        self.assertNotIn("Authorization", headers)  # the server decides on auth
+
 
 if __name__ == "__main__":
     unittest.main()

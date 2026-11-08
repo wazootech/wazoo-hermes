@@ -47,11 +47,12 @@ def run_cli(args: argparse.Namespace) -> int:
         print(f"world_id:  {world_id or '(auto-provisioned on first use)'}")
         print(f"world token: {'set' if token else 'not set'}")
         print(f"platform token: {'set' if platform else 'not set'}")
-        if not token and not platform:
-            print("unavailable: set WORLDS_TOKEN or WAZOO_PLATFORM_TOKEN")
+        custom = (cfg.get("data_url") or "https://data.wazoo.dev").rstrip("/") != "https://data.wazoo.dev"
+        if not token and not platform and not (custom and world_id):
+            print("unavailable: set WORLDS_TOKEN or WAZOO_PLATFORM_TOKEN, or data_url + world_id")
             return 1
     if args.wazoo_command == "check":
-        if not token:
+        if not token and not custom:
             print("check needs a world token (set WORLDS_TOKEN)")
             return 1
         base = (cfg.get("data_url") or "https://data.wazoo.dev").rstrip("/")
@@ -59,7 +60,8 @@ def run_cli(args: argparse.Namespace) -> int:
         def post(path, body):
             r = req.Request(f"{base}/worlds/{world_id}{path}",
                             data=json.dumps(body).encode(),
-                            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                            headers={"Content-Type": "application/json",
+                                     **({"Authorization": f"Bearer {token}"} if token else {})},
                             method="POST")
             with req.urlopen(r, timeout=15) as res:
                 return json.loads(res.read())

@@ -31,7 +31,7 @@ Or from this repository at a pinned commit.
 
 ## Setup
 
-Two paths, both through `hermes memory setup wazoo` (or Hermes secrets):
+Three paths, all through `hermes memory setup wazoo` (or Hermes secrets):
 
 - **One world per agent (default):** set `WORLDS_TOKEN` (a `wzw_` world
   token) and `WORLD_ID`. Get both from the Wazoo console.
@@ -40,10 +40,12 @@ Two paths, both through `hermes memory setup wazoo` (or Hermes secrets):
   world token, and persists both to `$HERMES_HOME/wazoo/world.json` (mode
   0600). Explicit `WORLDS_TOKEN` / `WORLD_ID` secrets always win over the
   state file.
-- **Self-hosted:** point `memory.wazoo.data_url` at your own worlds endpoint
-  (for example `http://localhost:8787`). No Wazoo account involved: mint a
-  namespace key from your own `WORLDS_API_ADMIN_KEY` once and set it as
-  `WORLDS_TOKEN` together with `world_id`.
+- **Self-hosted:** set `data_url` to your own worlds endpoint (for example
+  `http://localhost:8787`) and `world_id`. No Wazoo account involved. The
+  provider sends `WORLDS_TOKEN` when one is set and no `Authorization`
+  header otherwise, so the server decides whether a key is required.
+  Today's worlds-api always requires one: mint a namespace key from your own
+  `WORLDS_API_ADMIN_KEY` once and set it as `WORLDS_TOKEN`.
 
   ```
   curl -s -X POST http://localhost:8787/api-keys \

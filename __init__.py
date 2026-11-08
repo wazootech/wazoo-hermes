@@ -17,7 +17,6 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 from urllib import request as _urlrequest
-from urllib import parse as _urlparse
 from urllib.error import HTTPError, URLError
 
 from agent.memory_provider import MemoryProvider, RecallStatus, spawn_context_thread
@@ -94,7 +93,7 @@ def _memory_turtle(kind: str, statement: str, supersedes: str | None = None) -> 
 
 def _http_json(url: str, *, method: str = "GET", token: str = "", body: Any = None, timeout: float = 15.0) -> Any:
     headers = {"Accept": "application/json"}
-    if token:  # local/self-hosted worlds endpoints need no token
+    if token:  # tokenless only against a custom endpoint the user configured
         headers["Authorization"] = f"Bearer {token}"
     data = None
     if body is not None:
@@ -174,22 +173,23 @@ class WazooMemoryProvider(MemoryProvider):
     # -- availability and setup ----------------------------------------------
 
     @staticmethod
-    def _is_local_url(url: str) -> bool:
-        try:
-            host = _urlparse.urlparse(url).hostname or ""
-        except ValueError:
-            return False
-        return host in ("localhost", "127.0.0.1", "::1", "[::1]")
+    def _custom_endpoint(cfg: dict[str, str]) -> bool:
+        """A non-default data_url plus a world_id: the server decides whether
+        a token is needed. The plugin never guesses from the hostname."""
+        url = (cfg.get("data_url") or "").rstrip("/")
+        return bool(url and url != DEFAULT_DATA_URL and cfg.get("world_id"))
 
     def is_available(self) -> bool:
-        if self._is_local_url(self._load_config_block().get("data_url") or ""):
-            return True  # self-hosted worlds endpoint; no credentials needed
-        return bool(get_secret("WORLDS_TOKEN") or get_secret("WAZOO_PLATFORM_TOKEN"))
+        if get_secret("WORLDS_TOKEN") or get_secret("WAZOO_PLATFORM_TOKEN"):
+            return True
+        cfg = self._load_config_block()
+        cfg.setdefault("world_id", get_secret("WORLD_ID", "") or "")
+        return self._custom_endpoint(cfg)
 
     def unavailable_reason(self) -> str:
         return ("Set WORLDS_TOKEN (a wzw_ world token) or WAZOO_PLATFORM_TOKEN (a wzp_ platform token; "
-                "a world is provisioned automatically) in Hermes secrets, or point memory.wazoo.data_url "
-                "at a self-hosted worlds endpoint, then run 'hermes memory setup wazoo'.")
+                "a world is provisioned automatically) in Hermes secrets, or set data_url and world_id for "
+                "your own worlds endpoint, then run 'hermes memory setup wazoo'.")
 
     def get_config_schema(self) -> list[dict[str, Any]]:
         return CONFIG_SCHEMA
@@ -235,8 +235,9 @@ class WazooMemoryProvider(MemoryProvider):
         self._world_token = get_secret("WORLDS_TOKEN", "") or persisted.get("world_token", "")
         self._platform_token = get_secret("WAZOO_PLATFORM_TOKEN", "") or ""
         self._home = home
-        # Local/self-hosted endpoints need no token; hosted needs one (or provisions one).
-        self._ready = bool(self._world_token) or self._is_local_url(self._data_url)
+        # A token, or a configured custom endpoint + world (the server decides on auth).
+        self._ready = bool(self._world_token) or self._custom_endpoint(
+            {"data_url": self._data_url, "world_id": self._world_id})
         # Provision lazily on first use when only a platform token is present; never block startup.
         if not self._ready and self._platform_token:
             self._agent_label = self._agent_label or "agent"
