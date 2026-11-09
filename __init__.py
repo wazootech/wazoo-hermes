@@ -55,7 +55,7 @@ CONFIG_SCHEMA = [
     {"key": "world_token", "description": "Wazoo world token (wzw_)", "secret": True, "required": False,
      "env_var": "WORLDS_TOKEN", "url": "https://wazoo.dev"},
     {"key": "platform_token", "description": "Wazoo platform token (wzp_); provisions a world automatically",
-     "secret": True, "required": False, "env_var": "WAZOO_PLATFORM_TOKEN", "url": "https://wazoo.dev"},
+     "secret": True, "required": False, "env_var": "WAZOO_API_KEY", "url": "https://wazoo.dev"},
     {"key": "world_id", "description": "World id (w_...); optional with a world token, ignored when provisioning",
      "default": ""},
     {"key": "data_url", "description": "Worlds data-plane endpoint", "default": DEFAULT_DATA_URL},
@@ -180,14 +180,14 @@ class WazooMemoryProvider(MemoryProvider):
         return bool(url and url != DEFAULT_DATA_URL and cfg.get("world_id"))
 
     def is_available(self) -> bool:
-        if get_secret("WORLDS_TOKEN") or get_secret("WAZOO_PLATFORM_TOKEN"):
+        if get_secret("WORLDS_TOKEN") or get_secret("WAZOO_API_KEY"):
             return True
         cfg = self._load_config_block()
         cfg.setdefault("world_id", get_secret("WORLD_ID", "") or "")
         return self._custom_endpoint(cfg)
 
     def unavailable_reason(self) -> str:
-        return ("Set WORLDS_TOKEN (a wzw_ world token) or WAZOO_PLATFORM_TOKEN (a wzp_ platform token; "
+        return ("Set WORLDS_TOKEN (a wzw_ world token) or WAZOO_API_KEY (a wzp_ platform token; "
                 "a world is provisioned automatically) in Hermes secrets, or set data_url and world_id for "
                 "your own worlds endpoint, then run 'hermes memory setup wazoo'.")
 
@@ -233,7 +233,7 @@ class WazooMemoryProvider(MemoryProvider):
         persisted = self._load_provisioned(home) if home else {}
         self._world_id = get_secret("WORLD_ID", "") or base.get("world_id", "") or persisted.get("world_id", "")
         self._world_token = get_secret("WORLDS_TOKEN", "") or persisted.get("world_token", "")
-        self._platform_token = get_secret("WAZOO_PLATFORM_TOKEN", "") or ""
+        self._platform_token = get_secret("WAZOO_API_KEY", "") or ""
         self._home = home
         # A token, or a configured custom endpoint + world (the server decides on auth).
         self._ready = bool(self._world_token) or self._custom_endpoint(
@@ -403,9 +403,9 @@ class WazooMemoryProvider(MemoryProvider):
 
     def handle_tool_call(self, tool_name: str, args: dict, **kwargs) -> str:
         if not self._ensure_ready():
-            return json.dumps(tool_error("Wazoo is not configured: set WORLDS_TOKEN or WAZOO_PLATFORM_TOKEN"))
+            return json.dumps(tool_error("Wazoo is not configured: set WORLDS_TOKEN or WAZOO_API_KEY"))
         if not self._world_id:
-            return json.dumps(tool_error("Wazoo world id is not set: set WORLD_ID (or memory.wazoo.world_id in config.yaml), or provision with WAZOO_PLATFORM_TOKEN"))
+            return json.dumps(tool_error("Wazoo world id is not set: set WORLD_ID (or memory.wazoo.world_id in config.yaml), or provision with WAZOO_API_KEY"))
         try:
             return json.dumps(self._dispatch(tool_name, args))
         except HTTPError as exc:

@@ -128,6 +128,9 @@
                   },
                   "type": "array"
                 },
+                "token": {
+                  "type": "string"
+                },
                 "uid": {
                   "type": "string"
                 },
@@ -137,7 +140,8 @@
               },
               "required": [
                 "uid",
-                "name"
+                "name",
+                "token"
               ],
               "type": "object"
             }

@@ -25,9 +25,7 @@ READS = {
 }
 # Fields the API returns but its spec does not declare. Each names its issue;
 # the test fails once the spec catches up, so the entry gets removed.
-KNOWN_GAPS = {
-    ("wazoo-api POST /v1/worlds/{worldId}/auth/tokens", "token.token"): "wazootech/wazoo-api#152",
-}
+KNOWN_GAPS: dict[tuple[str, str], str] = {}
 
 
 def _json_schema(content: dict) -> dict:
