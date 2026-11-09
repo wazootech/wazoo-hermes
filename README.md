@@ -35,7 +35,7 @@ Three paths, all through `hermes memory setup wazoo` (or Hermes secrets):
 
 - **One world per agent (default):** set `WORLDS_TOKEN` (a `wzw_` world
   token) and `WORLD_ID`. Get both from the Wazoo console.
-- **Zero-config:** set `WAZOO_PLATFORM_TOKEN` (a `wzp_` token). On first use
+- **Zero-config:** set `WAZOO_API_KEY` (a `wzp_` token). On first use
   the provider provisions a world named after the profile, mints a scoped
   world token, and persists both to `$HERMES_HOME/wazoo/world.json` (mode
   0600). Explicit `WORLDS_TOKEN` / `WORLD_ID` secrets always win over the

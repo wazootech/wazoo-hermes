@@ -41,7 +41,7 @@ def run_cli(args: argparse.Namespace) -> int:
     persisted = _persisted_world()
     world_id = get_secret("WORLD_ID", "") or cfg.get("world_id", "") or persisted.get("world_id", "")
     token = get_secret("WORLDS_TOKEN", "") or persisted.get("world_token", "")
-    platform = get_secret("WAZOO_PLATFORM_TOKEN", "") or ""
+    platform = get_secret("WAZOO_API_KEY", "") or ""
     if args.wazoo_command in ("status", "check"):
         print(f"data_url:  {cfg.get('data_url') or 'https://data.wazoo.dev'}")
         print(f"world_id:  {world_id or '(auto-provisioned on first use)'}")
@@ -49,7 +49,7 @@ def run_cli(args: argparse.Namespace) -> int:
         print(f"platform token: {'set' if platform else 'not set'}")
         custom = (cfg.get("data_url") or "https://data.wazoo.dev").rstrip("/") != "https://data.wazoo.dev"
         if not token and not platform and not (custom and world_id):
-            print("unavailable: set WORLDS_TOKEN or WAZOO_PLATFORM_TOKEN, or data_url + world_id")
+            print("unavailable: set WORLDS_TOKEN or WAZOO_API_KEY, or data_url + world_id")
             return 1
     if args.wazoo_command == "check":
         if not token and not custom:

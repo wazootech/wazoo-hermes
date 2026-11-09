@@ -266,7 +266,7 @@ class TestAvailability(unittest.TestCase):
         _SECRETS.clear()
 
     def test_available_with_platform_token(self):
-        _SECRETS["WAZOO_PLATFORM_TOKEN"] = "wzp_x"
+        _SECRETS["WAZOO_API_KEY"] = "wzp_x"
         self.assertTrue(wz.WazooMemoryProvider().is_available())
         _SECRETS.clear()
 
